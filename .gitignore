@@ -1,0 +1,17 @@
+# Ignore folder data & file zip
+data/
+*.zip
+*.tar
+*.gz
+csiro-biomass.zip
+
+# Ignore model weights / checkpoints
+outputs/
+*.pth
+*.safetensors
+
+# Ignore cache & env
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.vscode/
