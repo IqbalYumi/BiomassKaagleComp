@@ -313,9 +313,9 @@ if __name__ == "__main__":
         'backbone_name': 'eva02_tiny_patch14_224',
         'img_size': 224,
         'batch_size': 32,
-        'epochs': 100,
-        'patience': 10,       # Early Stop!
-        'lr': 5e-4,
+        'epochs': 200,
+        'patience': 25,       # Early Stop!
+        'lr': 1e-4,
         'weight_decay': 1e-2,
         'drop_rate': 0.2,
         'output_dir': 'outputs'
