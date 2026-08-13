@@ -105,10 +105,10 @@ class BiomassDataset(Dataset):
         
         # Lokasi pencarian file gambar
         candidate_paths = [
-            os.path.join(self.dataset_root, raw_img_path),
             os.path.join(self.img_dir, filename),
             os.path.join(self.img_dir, raw_img_path),
-            os.path.join(self.dataset_root, 'train', filename),
+            os.path.join(self.dataset_root, raw_img_path),
+            os.path.join(self.dataset_root, 'Augmentation_data', filename),
             os.path.join(self.dataset_root, filename),
             raw_img_path
         ]
@@ -120,7 +120,7 @@ class BiomassDataset(Dataset):
                 break
                 
         if actual_img_path is None:
-            raise FileNotFoundError(f"File gambar '{filename}' tidak ditemukan.")
+            raise FileNotFoundError(f"File gambar '{filename}' tidak ditemukan di {self.img_dir}.")
             
         image = Image.open(actual_img_path).convert('RGB')
         
@@ -135,11 +135,12 @@ class BiomassDataset(Dataset):
 # 3. Data Transforms
 # ==========================================
 def get_transforms(img_size=224):
+    # Karena dataset offline di folder Augmentation_data sudah memiliki variasi rotasi & CLAHE,
+    # kita gunakan transform standar + ringan agar tidak melampaui batas saturasi.
     train_transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.5),
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
@@ -199,23 +200,55 @@ def train_pipeline(df: pd.DataFrame, img_dir: str, config: dict):
         pin_memory=pin_mem
     )
     
-    # Inisialisasi Model
+    # Inisialisasi Arsitektur Model
     model = BiomassEVA02TargetQueryModel(
         model_name=config['backbone_name'],
         pretrained=True,
         drop_rate=config['drop_rate']
     ).to(device)
-    
+
+    # -------------------------------------------------------------
+    # 1. PARTIAL FREEZING BACKBONE
+    # -------------------------------------------------------------
+    freeze_pct = config.get('freeze_backbone_pct', 0.6)
+    if freeze_pct > 0:
+        backbone_params = list(model.backbone.parameters())
+        num_to_freeze = int(len(backbone_params) * freeze_pct)
+        for i, param in enumerate(backbone_params):
+            if i < num_to_freeze:
+                param.requires_grad = False
+        print(f"✓ Berhasil mem-freeze {freeze_pct*100:.0f}% layer awal backbone ({num_to_freeze}/{len(backbone_params)} parameter tensor).")
+
+    # -------------------------------------------------------------
+    # 2. RESUME TRAINING / CHECKPOINT LOADING
+    # -------------------------------------------------------------
+    save_path = os.path.join(output_dir, 'best_biomass_eva02_model.pth')
+    best_val_r2 = config.get('baseline_r2', -float('inf'))
+
+    if os.path.exists(save_path) and config.get('resume', True):
+        print(f"\n[INFO] Memuat checkpoint terbaik sebelumnya dari: '{save_path}'")
+        model.load_state_dict(torch.load(save_path, map_location=device))
+        if best_val_r2 == -float('inf'):
+            best_val_r2 = 0.5886  # Rekor Mean R2 terbaik sebelumnya
+        print(f"✓ Bobot dimuat! Baseline Mean R² yang harus dilewati: {best_val_r2:.4f}\n")
+    else:
+        print("\n[INFO] Memulai pelatihan dari awal (Pretrained ImageNet).\n")
+        best_val_r2 = -float('inf')
+
+    # Optimizer, Loss, & Scheduler
     criterion = nn.HuberLoss(delta=1.0)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config['lr'], weight_decay=config['weight_decay'])
+    optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()), 
+        lr=config['lr'], 
+        weight_decay=config['weight_decay']
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config['epochs'], eta_min=1e-6)
     scaler = torch.amp.GradScaler('cuda') if is_cuda else None
 
-    best_val_r2 = -float('inf')
     patience = config['patience']
     patience_counter = 0
 
-    # cetak Header Tabel Evaluasi
+    # Cetak Header Tabel Evaluasi
     table_divider = "=" * 97
     sub_divider   = "-" * 97
     
@@ -288,9 +321,8 @@ def train_pipeline(df: pd.DataFrame, img_dir: str, config: dict):
         if val_r2 > best_val_r2:
             best_val_r2 = val_r2
             patience_counter = 0
-            save_path = os.path.join(output_dir, 'best_biomass_eva02_model.pth')
             torch.save(model.state_dict(), save_path)
-            print(f"   [★] Model Terbaik Disimpan (Best Mean R²: {best_val_r2:.4f})")
+            print(f"   [★] Model Terbaik Disimpan (Best Mean R² Baru: {best_val_r2:.4f})")
             print(sub_divider)
         else:
             patience_counter += 1
@@ -306,25 +338,29 @@ def train_pipeline(df: pd.DataFrame, img_dir: str, config: dict):
 
 
 # ==========================================
-# 5. Konfigurasi & Eksekusi
+# 5. Konfigurasi Hyperparameters & Eksekusi
 # ==========================================
 if __name__ == "__main__":
     hyperparameters = {
         'backbone_name': 'eva02_tiny_patch14_224',
         'img_size': 224,
-        'batch_size': 32,
-        'epochs': 200,
-        'patience': 25,       # Early Stop!
-        'lr': 1e-4,
-        'weight_decay': 1e-2,
-        'drop_rate': 0.2,
+        'batch_size': 16,             # Batch size 16 untuk dataset 3.570 gambar
+        'epochs': 20,
+        'patience': 30,               # Early stopping window
+        'lr': 5e-5,                   # Learning rate stabil untuk dataset augmented
+        'weight_decay': 0.05,         # Weight decay optimal
+        'drop_rate': 0.35,            # Dropout rate untuk mencegah overfitting
+        'freeze_backbone_pct': 0.6,   # Freeze 60% layer awal backbone
+        'resume': True,               # Melanjutkan dari checkpoint best_biomass_eva02_model.pth jika ada
+        'baseline_r2': 0.5886,        # Rekor R2 minimal yang harus dilewati
         'output_dir': 'outputs'
     }
     
     DATASET_DIR = r"D:\-\GEMASTIK 8\data\csiro-biomass"
     
-    csv_path = os.path.join(DATASET_DIR, 'train.csv')
-    img_dir = os.path.join(DATASET_DIR, 'train_images')
+    # MENGGUNAKAN DATASET HASIL AUGMENTASI & ENHANCEMENT
+    csv_path = os.path.join(DATASET_DIR, 'train_aug.csv')
+    img_dir = os.path.join(DATASET_DIR, 'Augmentation_data')
     
     print(f"Membaca CSV dari: {csv_path}")
     print(f"Membaca Folder Gambar dari: {img_dir}")
