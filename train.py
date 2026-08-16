@@ -344,15 +344,15 @@ if __name__ == "__main__":
     hyperparameters = {
         'backbone_name': 'eva02_tiny_patch14_224',
         'img_size': 224,
-        'batch_size': 16,             # Batch size 16 untuk dataset 3.570 gambar
-        'epochs': 20,
-        'patience': 30,               # Early stopping window
+        'batch_size': 8,             # Batch size 16 untuk dataset 3.570 gambar
+        'epochs': 50,
+        'patience': 25,               # Early stopping window
         'lr': 5e-5,                   # Learning rate stabil untuk dataset augmented
         'weight_decay': 0.05,         # Weight decay optimal
         'drop_rate': 0.35,            # Dropout rate untuk mencegah overfitting
         'freeze_backbone_pct': 0.6,   # Freeze 60% layer awal backbone
         'resume': True,               # Melanjutkan dari checkpoint best_biomass_eva02_model.pth jika ada
-        'baseline_r2': 0.5886,        # Rekor R2 minimal yang harus dilewati
+        'baseline_r2': 0.9780,        # Rekor R2 minimal yang harus dilewati
         'output_dir': 'outputs'
     }
     
