@@ -46,5 +46,5 @@ python predict.py
 
 - **Dataset:** `[Add dataset description and target columns]`
 - **Preprocessing:** `[Add feature engineering or image/tabular preprocessing steps]`
-- **Model Architecture:** `[Add model details from train.py / src/]`
+- **Model Architecture:** `Model EVA02 Tiny Patch`
 - **Validation & Results:** `[Add validation strategy and best R² score]`
