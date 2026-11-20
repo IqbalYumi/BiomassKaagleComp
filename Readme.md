@@ -1,4 +1,4 @@
-# Biomass Prediction — Kaggle Competition Solution
+# Biomass Estimation — Kaggle Competition Solution
 
 Machine learning pipeline for biomass estimation evaluated using the **R² Score** metric.
 
